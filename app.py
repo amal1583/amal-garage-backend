@@ -17,7 +17,6 @@ app = Flask(__name__)
 CORS(app)
 
 @app.route('/addParts', methods=['POST','GET'])
-@cross_origin
 def addParts():
     if request.method=='POST':
         data= request.get_json()
