@@ -61,11 +61,11 @@ def service(id):
     
     if request.method=='PUT':
         data=request.get_json()
-        db.collection('service').document(id).update(data)
+        db.collection('services').document(id).update(data)
         return jsonify({'Response':'updated successfully'})
     
     if request.method=='DELETE':
-        db.collection('service').document(id).delete()
+        db.collection('services').document(id).delete()
         return jsonify({'Response':'Deleted successfully'})
 
 @app.route('/addService', methods=['POST','GET'])        
@@ -106,6 +106,21 @@ def addEmployee():
         
         return jsonify(data)
 
+@app.route('/employee/<string:id>', methods=['PUT','DELETE','GET'])
+def employee(id):
+    if request.method=='GET':
+        result=(db.collection('employee').document(id).get()).to_dict()
+        return jsonify(result)
+    
+    if request.method=='PUT':
+        data=request.get_json()
+        db.collection('employee').document(id).update(data)
+        return jsonify({'Response':'updated successfully'})
+    
+    if request.method=='DELETE':
+        db.collection('employee').document(id).delete()
+        return jsonify({'Response':'Deleted successfully'})
+
 @app.route('/appointments', methods=['GET'])
 def appointments():
     if request.method=='GET':
@@ -133,7 +148,8 @@ def in_progress():
 @app.route('/sales', methods=['GET'])
 def sales():
     if request.method=='GET':
-        data= seeAllCompletedJobs()
+        data= completedJobsWithNames()
+        
 
         return jsonify(data)
 
@@ -166,6 +182,38 @@ def freeEmployee(id):
         else:
             return jsonify({'result':'NULL'})
 
+@app.route('/employeeJobs/<string:id>', methods=['GET'])
+def employeeJobs(id):
+    if request.method=='GET':
+        result= db.collection('appointments').where('employee_id','==',id).get()
+        data=[]
+        for r in result:
+            temp=r.to_dict()
+            temp.pop('location')
+            data.append(temp)
+        return jsonify(data)
+
+@app.route('/customerJobs/<string:id>', methods=['GET'])
+def customerJobs(id):
+    if request.method=='GET':
+        result= db.collection('appointments').where('customer_id','==',id).get()
+        data=[]
+        for r in result:
+            temp=r.to_dict()
+            temp.pop('location')
+            data.append(temp)
+        return jsonify(data)
+
+@app.route('/serviceProfit', methods=['GET'])
+def serviceProfit():
+    if request.method=='GET':
+        return jsonify(serviceRevenue())
+
+@app.route('/partProfit', methods=['GET'])
+def partProfit():
+    if request.method=='GET':
+        return jsonify(partRevenue())
+
 @app.route('/assignEmployee/<string:id>', methods=['PUT'])
 def assignEmployee(id):
     if request.method=='PUT':
@@ -182,8 +230,13 @@ def getData(tableName): #this will return the desired Data in array from where t
     list = []
     for d in data:
         a = d.to_dict()
-        list.append(a)
 
+        try:
+            a.pop('location')
+        except KeyError:
+            pass
+
+        list.append(a)
     return list
 
 #To view data in sequence wise, apply loop
@@ -257,5 +310,78 @@ def seeAllCompletedJobs():
 
     return temp
 
+def serviceRevenue():
+    completedjobs = seeAllCompletedJobs()
+
+    temp = []
+    serv_rev=0
+
+    for job in completedjobs:
+        sr_id = job['sr_id']
+        temp_id = "'" + sr_id + "'"
+
+        services = db.collection('services').document(temp_id).get().to_dict()
+        serv_rev= serv_rev + services['price'] 
+    return serv_rev
+
+def partRevenue():
+    completedjobs = seeAllCompletedJobs()
+    temp = []
+    pr_id=''
+    part_rev=0
+    count=0
+
+    for job in completedjobs:
+        pr_id = job['pr_id']
+
+        for i in range(len(pr_id)):
+            temp_id = "'" + pr_id[i] + "'"
+            print(temp_id)
+            parts = db.collection('parts').document(temp_id).get().to_dict()
+            part_rev = part_rev + parts['price']
+            count += 1
+        
+        
+    return part_rev
+
+def completedJobsWithNames():
+    completedjobs = seeAllCompletedJobs()
+    pr_id=''
+    temp = []
+
+    for job in completedjobs:
+        cusID = job['customer_id']
+        empID = job['employee_id']
+        sr_id = job['sr_id']
+        pr_id = job['pr_id'] #this will sometimes return array of having multiple ids for different parts
+        print(pr_id)
+        count=1
+
+        for i in range(len(pr_id)):
+            temp_id = "'" +pr_id[i]+ "'"
+            print(temp_id)
+            
+
+            parts = db.collection('parts').document(temp_id).get().to_dict()
+
+            job['part '+str(count)+'_name'] = parts['name']
+            job['part '+str(count)+'_price'] = parts['price']
+            count+=1
+
+        temp_id = "'"+ sr_id + "'"
+
+        services = db.collection('services').document(temp_id).get().to_dict()
+
+        job['service_name'] = services['name']
+        job['service_price'] = services['price']
+
+        customer = db.collection('customer').document(cusID.strip()).get().to_dict()
+        job['customer_name'] = customer['name']
+
+        employee = db.collection('employee').document(empID.strip()).get().to_dict()
+        job['employee_name'] = employee['name']
+        temp.append(job)
+
+    return temp
 if __name__=='__main__':
     app.run(debug=TRUE)
