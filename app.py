@@ -1,5 +1,6 @@
+from crypt import methods
 import datetime
-from datetime import timezone
+from datetime import *
 from pickle import TRUE
 import Validation as v
 from typing import overload
@@ -204,15 +205,14 @@ def customerJobs(id):
             data.append(temp)
         return jsonify(data)
 
-@app.route('/serviceProfit', methods=['GET'])
-def serviceProfit():
+@app.route('/totalProfit/<int:start>,<int:end>', methods=['GET'])
+def totalProfit(start,end):
     if request.method=='GET':
-        return jsonify(serviceRevenue())
+        temp=completedinframe(start,end)
+        temp.append(serviceRevenue(start,end))
+        temp.append(partRevenue(start,end))
+        return jsonify(temp)
 
-@app.route('/partProfit', methods=['GET'])
-def partProfit():
-    if request.method=='GET':
-        return jsonify(partRevenue())
 
 @app.route('/assignEmployee/<string:id>', methods=['PUT'])
 def assignEmployee(id):
@@ -309,23 +309,36 @@ def seeAllCompletedJobs():
             pass
 
     return temp
+def completedinframe(start,end):
+    start_date= datetime.fromtimestamp(start)
+    end_date= datetime.fromtimestamp(end)
+    ab=db.collection('appointments').where('appoint_time','>',start_date).where('appoint_time','<=',end_date).get()
+    l2=[]
+    for a in ab:
+        res=a.to_dict()
+        if res['status']['completed']:
+            res.pop('location')
+            l2.append(res)
 
-def serviceRevenue():
-    completedjobs = seeAllCompletedJobs()
+    return l2
+def serviceRevenue(start,end):
+    completedjobs = completedinframe(start,end)
 
     temp = []
     serv_rev=0
+    count=0
 
     for job in completedjobs:
         sr_id = job['sr_id']
         temp_id = "'" + sr_id + "'"
-
         services = db.collection('services').document(temp_id).get().to_dict()
-        serv_rev= serv_rev + services['price'] 
-    return serv_rev
+        serv_rev= serv_rev + services['price']
+        count+=1 
+    data={'services_given':count,'service_revenue':serv_rev}
+    return data
 
-def partRevenue():
-    completedjobs = seeAllCompletedJobs()
+def partRevenue(start,end):
+    completedjobs = completedinframe(start,end)
     temp = []
     pr_id=''
     part_rev=0
@@ -333,17 +346,32 @@ def partRevenue():
 
     for job in completedjobs:
         pr_id = job['pr_id']
-
+        print(pr_id)
         for i in range(len(pr_id)):
             temp_id = "'" + pr_id[i] + "'"
-            print(temp_id)
             parts = db.collection('parts').document(temp_id).get().to_dict()
             part_rev = part_rev + parts['price']
             count += 1
-        
-        
-    return part_rev
+    data={'parts_sold':count,'parts_revenue':part_rev}
+    return data
+# @app.route('/partSale',methods=['GET'])
+# def partSale():
+#     completedjobs = seeAllCompletedJobs()
+#     temp = []
+#     pr_id=''
+#     part_rev=0
+#     count=0
+#     da={}
 
+#     for job in completedjobs:
+#         pr_id = job['pr_id']
+#         print(pr_id)
+#         for i in range(len(pr_id)):
+#             print(pr_id[i],job['appoint_time'])
+#             part_rev = part_rev + parts['price']
+#             count += 1
+#     #data={'parts_sold':count,'parts_revenue':part_rev}
+#     return da
 def completedJobsWithNames():
     completedjobs = seeAllCompletedJobs()
     pr_id=''
@@ -354,12 +382,10 @@ def completedJobsWithNames():
         empID = job['employee_id']
         sr_id = job['sr_id']
         pr_id = job['pr_id'] #this will sometimes return array of having multiple ids for different parts
-        print(pr_id)
         count=1
 
         for i in range(len(pr_id)):
             temp_id = "'" +pr_id[i]+ "'"
-            print(temp_id)
             
 
             parts = db.collection('parts').document(temp_id).get().to_dict()
