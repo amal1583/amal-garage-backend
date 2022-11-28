@@ -1,227 +1,451 @@
-from crypt import methods
-import datetime
-from datetime import *
+# from crypt import methods
+# import datetime
+# from datetime import *
+from genericpath import exists
+import time
+from datetime import datetime, timezone
 from pickle import TRUE
 import Validation as v
 from typing import overload
-import firebase_admin , json
+import firebase_admin, json
 from flask import Flask, jsonify, request
 from firebase_admin import credentials
-from firebase_admin import firestore
+from firebase_admin import firestore , auth
 from flask_cors import CORS , cross_origin
+from flask import Response
+from partsSalePrediction import previousPartSale, futurePartSale
+from servicesSalePrediction import previousServicesSale, futureServicesSale
 
 cred = credentials.Certificate('serviceAccountKey.json')
 firebase_admin.initialize_app(cred)
-
-db= firestore.client()
+au=auth._auth_client
+db = firestore.client()
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/addParts', methods=['POST','GET'])
-def addParts():
-    if request.method=='POST':
-        data= request.get_json()
-        ct = datetime.datetime.now(datetime.timezone.utc)
-        print(type(data))
-        data['created_at']= ct
-        list1=db.collection('parts').get()
-        str1=v.nextId(list1)
+
+# ---------------------- signin api -----------------
+@app.route('/signin', methods=['GET'])
+def signin():
+    if request.method == 'GET':
+        phone = request.args.get('phone')
+        password = request.args.get('password')
+        user = (db.collection('users').document(phone).get()).to_dict()
+        if user is not None:
+            if user['password'] == password:
+                token = datetime.now().strftime('%d%m%y%H%M%S%f')
+                admin_permissions = {
+                    "employees": True,
+                    "parts": True,
+                    "services": True,
+                    "appointments": True,
+                    "dashboard": True,
+                    "partsPrediction": True,
+                    "servicesPrediction": True,
+                }
+                customer_permissions = {
+                    "customer_appointments": True,
+                }
+                data = dict()
+                data['token'] = token
+                data['usertype'] = user['user_type']
+                data['userid'] = user['phone']
+                if user['user_type'] == "admin":
+                    data["permissions"] = admin_permissions
+                elif user['user_type'] == "customer":
+                    data["permissions"] = customer_permissions
+                return jsonify(data)
+            else:
+                message = {'detail': 'incorrect password'}
+                return jsonify(message), 400
+        else:
+            message = {'detail': 'user not found'}
+            return jsonify(message), 400
+
+
+# ----------------------  Employee Apis ------------------------------
+@app.route('/employees', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def employee():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        if id is not None:
+            result = (db.collection('employee').document(id).get()).to_dict()
+            return jsonify(result)
+        else:
+            result = db.collection('employee').get()
+            data = []
+            for r in result:
+                data.append(r.to_dict())
+            return jsonify(data)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        ct = datetime.now(timezone.utc)
+        data['created_at'] = ct
+        db.collection('employee').document(data['phone']).set(data)
+        return jsonify({'Response': 'employee added sucessfully'})
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+        db.collection('employee').document(data['phone']).update(data)
+        return jsonify({'Response': 'updated successfully'})
+
+    elif request.method == 'DELETE':
+        id = request.args.get('id')
+        db.collection('employee').document(id).delete()
+        return jsonify({'Response': 'Deleted successfully'})
+
+# -------------------------- Services APIS -----------------------------------
+
+@app.route('/services', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def service():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        if id is not None:
+            result = (db.collection('services').document(id).get()).to_dict()
+            result['id'] = id
+            return jsonify(result)
+        else:
+            result = db.collection('services').get()
+            data = []
+            for r in result:
+                res = r.to_dict()
+                res['id'] = r.id
+                data.append(res)
+            return jsonify(data)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        ct = datetime.now(timezone.utc)
+        data['created_at'] = ct
+        list1 = db.collection('services').get()
+        str1 = v.nextId(list1)
+        data['id']=str1
+        data['price']=int(data['price'])
+        data['service_avail']=0
+        db.collection('services').document(str1).set(data)
+        return jsonify({'Response': 'service added successfully'})
+
+    if request.method == 'PUT':
+        data = request.get_json()
+        data.pop("service_avail", None)
+        db.collection('services').document(data['id']).update(data)
+        return jsonify({'Response': 'updated successfully'})
+
+    if request.method == 'DELETE':
+        id = request.args.get('id')
+        db.collection('services').document(id).delete()
+        return jsonify({'Response': 'Deleted successfully'})
+
+
+# ----------------------------  Parts APIS -------------------------------------
+
+@app.route('/parts', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def parts():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        if id is not None:
+            result = (db.collection('parts').document(id).get()).to_dict()
+            result['id'] = id
+            return jsonify(result)
+        else:
+            result = db.collection('parts').get()
+            data = []
+            for r in result:
+                res = r.to_dict()
+                res['id'] = r.id
+                data.append(res)
+            return jsonify(data)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        ct = datetime.now(timezone.utc)
+        data['created_at'] = ct
+        list1 = db.collection('parts').get()
+        str1 = v.nextId(list1)
+        data['id']=str1
+        data['price']=int(data['price'])
+        data['quantity']=int(data['quantity'])
+        data['part_sold']=0
         db.collection('parts').document(str1).set(data)
         db.collection('parts').document(str1).update({'updated_at': firestore.ArrayUnion([ct])})
+        return jsonify({'Response': 'part added successfully'})
 
-        return jsonify({'Response':'part added successfully'})
+    elif request.method == 'PUT':
+        data = request.get_json()
+        data.pop("part_sold", None)
+        db.collection('parts').document(data['id']).update(data)
+        return jsonify({'Response': 'updated successfully'})
 
-    if request.method=='GET':
-        result= db.collection('parts').get()
-        data=[]
-        for r in result:
-            data.append(r.to_dict())
-            print(r.id)
-        
-        return jsonify(data)
-@app.route('/parts/<string:id>', methods=['PUT','DELETE','GET'])
-def parts(id):
-    if request.method=='GET':
-        result=(db.collection('parts').document(id).get()).to_dict()
-        return jsonify(result)
-    
-    if request.method=='PUT':
-        data=request.get_json()
-        db.collection('parts').document(id).update(data)
-        return jsonify({'Response':'updated successfully'})
-    
-    if request.method=='DELETE':
+    if request.method == 'DELETE':
+        id = request.args.get('id')
         db.collection('parts').document(id).delete()
-        return jsonify({'Response':'Deleted successfully'})
+        return jsonify({'Response': 'Deleted successfully'})
 
-@app.route('/service/<string:id>', methods=['PUT','DELETE','GET'])
-def service(id):
-    if request.method=='GET':
-        result=(db.collection('services').document(id).get()).to_dict()
-        return jsonify(result)
-    
-    if request.method=='PUT':
-        data=request.get_json()
-        db.collection('services').document(id).update(data)
-        return jsonify({'Response':'updated successfully'})
-    
-    if request.method=='DELETE':
-        db.collection('services').document(id).delete()
-        return jsonify({'Response':'Deleted successfully'})
-
-@app.route('/addService', methods=['POST','GET'])        
-def addService():
-    if request.method=='POST':
-        data= request.get_json()
-        ct = datetime.datetime.now(datetime.timezone.utc)
-        data['created_at']= ct
-        list1=db.collection('services').get()
-        str1=v.nextId(list1)
-        db.collection('services').document(str1).set(data)
-        return jsonify({'Response':'service added successfully'})
-
-    if request.method=='GET':
-        result= db.collection('services').get()
-        data=[]
-        for r in result:
-            data.append(r.to_dict())
-            print(r.id)
+# ------------------------ create new Appointments ------------------------
+@app.route('/new_appointment', methods=['GET','POST'])
+def new_appointment():
+    # if request.method == 'GET':
+    #     data = seeAllInProgressJobs()
+    #     return jsonify(data)
+    if request.method =='POST':
+        data = request.get_json()
+        ct = datetime.now(timezone.utc)
+        data['created_at'] = ct
         
-        return jsonify(data)
-@app.route('/addEmployee', methods=['POST','GET'])
-def addEmployee():
-    if request.method=='POST':
-        data= request.get_json()
-        ct = datetime.datetime.now(datetime.timezone.utc)
-        print(type(data))
-        data['created_at']= ct
-        db.collection('employee').document(data['phone']).set(data)
-        return jsonify({'Response':'employee added sucessfully'})
-    
-    if request.method=='GET':
-        result= db.collection('employee').get()
-        data=[]
-        for r in result:
-            data.append(r.to_dict())
-            print(r.id)
-        
-        return jsonify(data)
 
-@app.route('/employee/<string:id>', methods=['PUT','DELETE','GET'])
-def employee(id):
-    if request.method=='GET':
-        result=(db.collection('employee').document(id).get()).to_dict()
-        return jsonify(result)
-    
-    if request.method=='PUT':
-        data=request.get_json()
-        db.collection('employee').document(id).update(data)
-        return jsonify({'Response':'updated successfully'})
-    
-    if request.method=='DELETE':
-        db.collection('employee').document(id).delete()
-        return jsonify({'Response':'Deleted successfully'})
-
+#  ------------------------ Appointments -------------------------------
 @app.route('/appointments', methods=['GET'])
 def appointments():
-    if request.method=='GET':
-        data= getData("appointments")
+    if request.method == 'GET':
+        data = getData("appointments")
         return jsonify(data)
 
+
+# ----------------------- Un Assigned Appointments -----------------
 @app.route('/unassigned', methods=['GET'])
 def unassigned():
-    if request.method=='GET':
-        data= seeUnAssignedJobs()
+    if request.method == 'GET':
+        data = seeUnAssignedJobs()
         return jsonify(data)
 
+# ----------------------- Pending Appointments -----------------
 @app.route('/pending', methods=['GET'])
 def pending():
-    if request.method=='GET':
-        data= seeAllPendingJobs()
+    if request.method == 'GET':
+        data = seeAllPendingJobs()
         return jsonify(data)
 
+
+# ------------------------ In Progress Appointments ------------------------
 @app.route('/in_progress', methods=['GET'])
 def in_progress():
-    if request.method=='GET':
-        data= seeAllInProgressJobs()
+    if request.method == 'GET':
+        data = seeAllInProgressJobs()
         return jsonify(data)
 
+
+# -------------------------- Completed Appointments -------------------------
 @app.route('/sales', methods=['GET'])
 def sales():
-    if request.method=='GET':
-        data= completedJobsWithNames()
-        
-
+    if request.method == 'GET':
+        data = completedJobsWithNames()
         return jsonify(data)
 
-@app.route('/freeEmployee/<string:id>', methods=['GET'])
-def freeEmployee(id):
-    if request.method=='GET':
-        emp= db.collection('employee').get()
-        emp_list=[]
-        for p in emp:
-            emp_list.append(p.id)
-        appoint=(db.collection('appointments').document(id).get()).to_dict()
-        appoint_time= appoint['appoint_time']
-        docs = db.collection(u'appointments').where('appoint_time' ,'==', appoint_time ).get()
-        if docs:
-            for doc in docs:
-                t1=doc.to_dict()
-                for i in range(len(emp_list)):
-                    if int(t1['employee_id']) == int(emp_list[i]):
-                        print(len(emp_list))
-                        print(emp_list[i])
-                        emp_list.remove(emp_list[i])
-                        print(emp_list)
-                        print('removed' )
-                        break
-            emp_list2=[]
-            for index in range(len(emp_list)):
-                result= (db.collection('employee').document(emp_list[index]).get()).to_dict()
-                emp_list2.append(result)
-            return jsonify(emp_list2)
+# ---------------------- Get Free employees -------------------------
+@app.route('/freeEmployees', methods=['GET'])
+def freeEmployee():
+    if request.method == 'GET':
+        appointment_id = request.args.get('appointment_id')
+        employees = db.collection('employee').get()
+        employee_list = []
+        for employee in employees:
+            employee_list.append(employee.id)
+        requested_appointment = (db.collection('appointments').document(appointment_id).get()).to_dict()
+        all_appointments = db.collection(u'appointments').where('appoint_time', '==', requested_appointment['appoint_time']).get()
+
+        if all_appointments:
+            for appointment in all_appointments:
+                appointment = appointment.to_dict()
+                if 'employee_id' in appointment.keys():
+                    if appointment['employee_id'] is not None and appointment['employee_id'] != "":
+                        employee_list.remove(appointment['employee_id'])
+            final_employees = []
+            free_employees = db.collection(u'employee').where('phone', 'in', employee_list).get()
+            for final in free_employees:
+                final_employees.append(final.to_dict())
+            return jsonify(final_employees)
         else:
-            return jsonify({'result':'NULL'})
+            return jsonify([])
 
-@app.route('/employeeJobs/<string:id>', methods=['GET'])
-def employeeJobs(id):
-    if request.method=='GET':
-        result= db.collection('appointments').where('employee_id','==',id).get()
-        data=[]
+# ------------------------- Assign employee to job -----------------------
+@app.route('/assignEmployee', methods=['PUT'])
+def assignEmployee():
+    if request.method == 'PUT':
+        data = request.get_json()
+        appointment_id = data.pop("appointment_id", None)
+        ct = datetime.now(timezone.utc)
+        data['status.assigned'] = ct
+        db.collection('appointments').document(appointment_id).update(data)
+        return jsonify({'Response': 'employee assigned successfully'})
+
+
+# ---------------- Jobs of specific employee -----------------------
+@app.route('/employeeJobs', methods=['GET'])
+def employeeJobs():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        result = db.collection('appointments').where('employee_id', '==', id).get()
+        data = []
         for r in result:
-            temp=r.to_dict()
-            temp.pop('location')
+            temp = r.to_dict()
+            if 'location' in temp:
+                temp.pop('location')
             data.append(temp)
         return jsonify(data)
 
-@app.route('/customerJobs/<string:id>', methods=['GET'])
-def customerJobs(id):
-    if request.method=='GET':
-        result= db.collection('appointments').where('customer_id','==',id).get()
-        data=[]
-        for r in result:
-            temp=r.to_dict()
-            temp.pop('location')
-            data.append(temp)
+
+# -------------------------------- total parts sale  -----------------------------
+@app.route('/partRevenue', methods=['GET'])
+def totalPartsRevenue():
+    if request.method == 'GET':
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        start_date = time.mktime(datetime.strptime(start_date, "%Y-%m-%d").timetuple())
+        end_date = time.mktime(datetime.strptime(end_date, "%Y-%m-%d").timetuple())
+
+        final_data = []
+        appointments = completedinframe(start_date, end_date)
+
+        for appointment in appointments:
+            appointment_date = appointment['appoint_time']
+            appointment_date = str(appointment_date.date())
+            total_parts_price = 0
+            part_ids = appointment['pr_id']
+            for part in part_ids:
+                temp_id = part
+                db_part = db.collection('parts').document(temp_id).get().to_dict()
+                total_parts_price += int(db_part['price'])
+
+            if len(final_data) > 0:
+                is_exist = False
+                for final in final_data:
+                    if final['date'] == appointment_date:
+                        print()
+                        final['sale'] += total_parts_price
+                        is_exist = True
+                        break
+                if not is_exist:
+                    final_data.append({'date': appointment_date, 'sale': total_parts_price})
+            else:
+                final_data.append({'date': appointment_date, 'sale': total_parts_price})
+
+        return jsonify(final_data)
+
+
+# -------------------------------- total services sale  -----------------------------
+@app.route('/serviceRevenue', methods=['GET'])
+def totalServiceRevenue():
+    if request.method == 'GET':
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        start_date = time.mktime(datetime.strptime(start_date, "%Y-%m-%d").timetuple())
+        end_date = time.mktime(datetime.strptime(end_date, "%Y-%m-%d").timetuple())
+
+        final_data = []
+        appointments = completedinframe(start_date, end_date)
+
+        for appointment in appointments:
+            appointment_date = appointment['appoint_time']
+            appointment_date = str(appointment_date.date())
+            total_service_price = 0
+            service_id = appointment['sr_id']
+            service_id = service_id 
+            db_service = db.collection('services').document(service_id).get().to_dict()
+            if db_service is not None:
+                total_service_price += int(db_service['price'])
+
+                if len(final_data) > 0:
+                    is_exist = False
+                    for final in final_data:
+                        if final['date'] == appointment_date:
+                            final['sale'] += total_service_price
+                            is_exist = True
+                            break
+                    if not is_exist:
+                        final_data.append({'date': appointment_date, 'sale': total_service_price})
+                else:
+                    final_data.append({'date': appointment_date, 'sale': total_service_price})
+
+        return jsonify(final_data)
+
+
+# -------------------------------- Top Selling Data  -----------------------------
+@app.route('/topSelling', methods=['GET'])
+def topSellingData():
+    if request.method == 'GET':
+        parts_data = []
+        services_data = []
+        parts = db.collection('parts').order_by("part_sold",direction=firestore.Query.DESCENDING).limit(3).get()
+        for part in parts:
+            parts_data.append(part.to_dict())
+
+        services = db.collection('services').order_by("service_avail",direction=firestore.Query.DESCENDING).limit(3).get()
+        for service in services:
+            services_data.append(service.to_dict())
+
+        dic = {
+            "parts": parts_data,
+            "services": services_data
+        }
+        return jsonify(dic)
+
+# -------------------------- Customer APIS -----------------------------------
+@app.route('/customer', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def customer():    
+    if request.method == 'POST':
+        data = request.get_json()
+        users={}
+        ct = datetime.now(timezone.utc)
+        data['created_at'] = ct
+        db.collection('customer').document(data['phone']).set(data)
+        users['name']=data['name']
+        users['password']=data['password']
+        users['phone']=data['phone']
+        users['user_type']='customer'
+        db.collection('users').document(users['phone']).set(users)
+        return jsonify({'Response': 'customer added sucessfully'})
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+        db.collection('customer').document(data['phone']).update(data)
+        return jsonify({'Response': 'updated successfully'})
+
+# ------------------- customer History---------------------------
+@app.route('/customerCompletedAppointments', methods=['GET'])
+def customerCompletedAppointments():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        results = db.collection('sales').where('customer_id','==',id).order_by("appoint_time",direction=firestore.Query.DESCENDING).get()
+        data = []
+        for result in results:
+            temp = result.to_dict()
+            temp.pop('location', None)
+            if "status" in temp.keys():
+                all_status = temp['status']
+                if "completed" in all_status.keys():
+                    data.append(temp)
         return jsonify(data)
 
-@app.route('/totalProfit/<int:start>,<int:end>', methods=['GET'])
-def totalProfit(start,end):
-    if request.method=='GET':
-        temp=completedinframe(start,end)
-        temp.append(serviceRevenue(start,end))
-        temp.append(partRevenue(start,end))
-        return jsonify(temp)
+# ------------------------- customer live appointments---------------------------
+@app.route('/customerPendingAppointments', methods=['GET'])
+def customerPendingAppointments():
+    if request.method == 'GET':
+        id = request.args.get('id')
+        results = db.collection('appointments').where('customer_id','==',id).order_by("appoint_time",direction=firestore.Query.DESCENDING).get()
+        data = []
+        for result in results:
+            temp = result.to_dict()
+            temp.pop('location', None)
+            if "status" in temp.keys():
+                all_status = temp['status']
+                if "completed" not in all_status.keys():
+                    data.append(temp)
+            else:
+                data.append(temp)
+        return jsonify(data)
 
 
-@app.route('/assignEmployee/<string:id>', methods=['PUT'])
-def assignEmployee(id):
-    if request.method=='PUT':
-        data= request.get_json()
-        ct = datetime.datetime.now(datetime.timezone.utc)
-        data['status.assigned']=ct
-        db.collection('appointments').document(id).update(data)
-        return jsonify({'Response':'employee assigned successfully'})
+# @app.route('/customerJobs/<string:id>', methods=['GET'])
+# def customerJobs(id):
+#     if request.method == 'GET':
+#         result = db.collection('sales').where('customer_id','==',id).order_by("appoint_time",direction=firestore.Query.DESCENDING).get()
+#         data = []
+#         for r in result:
+#             temp = r.to_dict()
+#             temp.pop('location')
+#             data.append(temp)
+#         return jsonify(data)
 
 
 #this function will receive table name whose data you wish to use
@@ -230,7 +454,7 @@ def getData(tableName): #this will return the desired Data in array from where t
     list = []
     for d in data:
         a = d.to_dict()
-
+        a['id'] = d.id
         try:
             a.pop('location')
         except KeyError:
@@ -239,6 +463,8 @@ def getData(tableName): #this will return the desired Data in array from where t
         list.append(a)
     return list
 
+
+
 #To view data in sequence wise, apply loop
 '''---------------------------------------------------------------------------------'''
 
@@ -246,34 +472,28 @@ def getData(tableName): #this will return the desired Data in array from where t
 #This function will return a list (array) which contains all those appointments which are un-assigned along with all corresponding appointment details
 def seeUnAssignedJobs():
     temp = []
-    appointmentTable = getData("appointments")
-
-    for data in appointmentTable:
+    appointment_data = getData("appointments")
+    for data in appointment_data:
         try:
             a = data['status']['assigned']
         except KeyError:
             temp.append(data)
-
     return temp
 
 #assigned = True and no in-progress
 #Will give list whihc contains all the pending jobs along details
 def seeAllPendingJobs():
     temp = []
-    appointmentTable = getData("appointments")
-
-    for data in appointmentTable:
+    appointment_table = getData("appointments")
+    for data in appointment_table:
         try:
             a = data['status']['assigned']
-
             try:
                 b = data['status']['in_progress']
             except KeyError:
                 temp.append(data)
-
         except KeyError:
             pass
-
     return temp
 
 #when complete is empty and in-progress exists then it is in progresss
@@ -309,69 +529,24 @@ def seeAllCompletedJobs():
             pass
 
     return temp
+
 def completedinframe(start,end):
-    start_date= datetime.fromtimestamp(start)
-    end_date= datetime.fromtimestamp(end)
-    ab=db.collection('appointments').where('appoint_time','>',start_date).where('appoint_time','<=',end_date).get()
-    l2=[]
+    start_date = datetime.fromtimestamp(start)
+    end_date = datetime.fromtimestamp(end)
+    ab = db.collection('appointments').where('appoint_time','>',start_date).where('appoint_time','<=',end_date).get()
+    l2 = []
     for a in ab:
-        res=a.to_dict()
-        if res['status']['completed']:
-            res.pop('location')
-            l2.append(res)
+        res = a.to_dict()
+        if 'status' in res.keys():
+            statuses = res['status']
+            if 'completed' in statuses.keys():
+                if statuses['completed'] != "" and statuses['completed'] is not None:
+                    res.pop('location')
+                    l2.append(res)
 
     return l2
-def serviceRevenue(start,end):
-    completedjobs = completedinframe(start,end)
 
-    temp = []
-    serv_rev=0
-    count=0
 
-    for job in completedjobs:
-        sr_id = job['sr_id']
-        temp_id = "'" + sr_id + "'"
-        services = db.collection('services').document(temp_id).get().to_dict()
-        serv_rev= serv_rev + services['price']
-        count+=1 
-    data={'services_given':count,'service_revenue':serv_rev}
-    return data
-
-def partRevenue(start,end):
-    completedjobs = completedinframe(start,end)
-    temp = []
-    pr_id=''
-    part_rev=0
-    count=0
-
-    for job in completedjobs:
-        pr_id = job['pr_id']
-        print(pr_id)
-        for i in range(len(pr_id)):
-            temp_id = "'" + pr_id[i] + "'"
-            parts = db.collection('parts').document(temp_id).get().to_dict()
-            part_rev = part_rev + parts['price']
-            count += 1
-    data={'parts_sold':count,'parts_revenue':part_rev}
-    return data
-# @app.route('/partSale',methods=['GET'])
-# def partSale():
-#     completedjobs = seeAllCompletedJobs()
-#     temp = []
-#     pr_id=''
-#     part_rev=0
-#     count=0
-#     da={}
-
-#     for job in completedjobs:
-#         pr_id = job['pr_id']
-#         print(pr_id)
-#         for i in range(len(pr_id)):
-#             print(pr_id[i],job['appoint_time'])
-#             part_rev = part_rev + parts['price']
-#             count += 1
-#     #data={'parts_sold':count,'parts_revenue':part_rev}
-#     return da
 def completedJobsWithNames():
     completedjobs = seeAllCompletedJobs()
     pr_id=''
@@ -385,7 +560,7 @@ def completedJobsWithNames():
         count=1
 
         for i in range(len(pr_id)):
-            temp_id = "'" +pr_id[i]+ "'"
+            temp_id = pr_id[i]
             
 
             parts = db.collection('parts').document(temp_id).get().to_dict()
@@ -394,20 +569,66 @@ def completedJobsWithNames():
             job['part '+str(count)+'_price'] = parts['price']
             count+=1
 
-        temp_id = "'"+ sr_id + "'"
+        temp_id = sr_id 
 
         services = db.collection('services').document(temp_id).get().to_dict()
-
-        job['service_name'] = services['name']
-        job['service_price'] = services['price']
+        if services is not None:
+            job['service_name'] = services['name']
+            job['service_price'] = services['price']
 
         customer = db.collection('customer').document(cusID.strip()).get().to_dict()
-        job['customer_name'] = customer['name']
+        if customer is not None:
+            job['customer_name'] = customer['name']
+        else:
+            job['customer_name'] = ""
 
         employee = db.collection('employee').document(empID.strip()).get().to_dict()
-        job['employee_name'] = employee['name']
+        if employee is not None:
+            job['employee_name'] = employee['name']
+        else:
+            job['employee_name'] = ""
         temp.append(job)
 
     return temp
+
+
+
+@app.route('/historicPartSale', methods=['GET'])
+def historicPartsSale():
+    if request.method == 'GET':
+        response = previousPartSale()
+        return jsonify(response)
+
+
+@app.route('/futurePartSale', methods=['GET'])
+def futurePartsSale():
+    if request.method == 'GET':
+        response = futurePartSale()
+        return jsonify(response)
+
+
+@app.route('/historicServicesSale', methods=['GET'])
+def historicServiceSale():
+    if request.method == 'GET':
+        response = previousServicesSale()
+        return jsonify(response)
+
+
+@app.route('/futureServicesSale', methods=['GET'])
+def futureServiceSale():
+    if request.method == 'GET':
+        response = futureServicesSale()
+        return jsonify(response)
+
+@app.route('/serviceDonutChart',methods=["GET"])
+def serviceDonutChart(): 
+    home , garage= v.serv_category()
+    data = {'labels': ['Home', 'Garage'],'datasets': [{'label': 'Services','data': [home, garage],'backgroundColor': ['rgba(255, 99, 132)','rgba(54, 162, 235)'],'borderWidth': 1}]} 
+    if request.method == 'GET':
+        response = data
+        return jsonify(response)
+    else:
+        return jsonify({'message':request.method +"is not allowed on this route"})
+
 if __name__=='__main__':
     app.run(debug=TRUE)

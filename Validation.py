@@ -1,4 +1,22 @@
+import csv
 
+
+
+
+# for counting home and garage
+def serv_category():
+    with open('services_mock_1.csv', mode='r') as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        line_count=1
+        home=0
+        garage=0
+        for row in csv_reader:
+            if row['category'] == 'home':
+                home+=1
+            elif row['category'] == 'garage':
+                garage+=1
+        #print(home, garage)
+    return home , garage
 #for validation of mobile number
 def mobileValidation(num): #give number as parameter, this will return 'True' or 'False'
     n = str(num)
@@ -32,6 +50,6 @@ def nextId(data):
     count = str(temp)
 
     if len(count) < 2:
-        return "'0" + count + "'"
+        return "0" + count 
     else:
-        return "'" + count + "'"
+        return count 
