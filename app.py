@@ -229,9 +229,31 @@ def in_progress():
 @app.route('/sales', methods=['GET'])
 def sales():
     if request.method == 'GET':
-        data = completedJobsWithNames()
+        result = db.collection('sales').get()
+        data = []
+        for r in result:
+            res = r.to_dict()
+            res['id'] = r.id
+            if 'location' in res:
+                res.pop('location')
+            data.append(res)
+        #data = completedJobsWithNames()
         return jsonify(data)
 
+# ------------------------- job completed-----------------------
+@app.route('/jobCompleted', methods=['GET','PUT'])
+def jobCompleted():
+    if request.method == 'PUT':
+        data = request.get_json()
+        appointment_id = data.pop("appointment_id", None)
+        ct = datetime.now(timezone.utc)
+        data['status.completed'] = ct
+        db.collection('appointments').document(appointment_id).update(data)
+        completedJobsWithNames()
+        return jsonify({'Response': 'job completed successfully'})
+    # elif request.method == 'GET':
+    #     data= completedJobsWithNames()
+    #     return jsonify(data)
 # ---------------------- Get Free employees -------------------------
 @app.route('/freeEmployees', methods=['GET'])
 def freeEmployee():
@@ -587,6 +609,8 @@ def completedJobsWithNames():
             job['employee_name'] = employee['name']
         else:
             job['employee_name'] = ""
+        db.collection('sales').document(job['id']).set(job)
+        db.collection('appointments').document(job['id']).delete()
         temp.append(job)
 
     return temp
